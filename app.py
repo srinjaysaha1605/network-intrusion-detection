@@ -2,9 +2,10 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
-import joblib
 import json
 import os
+import sys
+import importlib.util
 
 # --------------------------------------------------
 # PAGE CONFIGURATION
@@ -16,6 +17,14 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="expanded"
 )
+
+st.write("Python version:", sys.version)
+
+joblib_spec = importlib.util.find_spec("joblib")
+
+st.write("Joblib module:", joblib_spec)
+
+import joblib
 
 PROJECT_DIR = os.path.dirname(os.path.abspath(__file__))
 
