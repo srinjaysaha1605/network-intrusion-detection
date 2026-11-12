@@ -2,10 +2,9 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
+import joblib
 import json
 import os
-import sys
-import importlib.util
 
 # --------------------------------------------------
 # PAGE CONFIGURATION
@@ -18,23 +17,17 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-st.write("Python version:", sys.version)
-
-joblib_spec = importlib.util.find_spec("joblib")
-
-st.write("Joblib module:", joblib_spec)
-
-import joblib
-
 PROJECT_DIR = os.path.dirname(os.path.abspath(__file__))
 
 MODEL_PATH = os.path.join(
-    PROJECT_DIR, "model_artifacts",
+    PROJECT_DIR,
+    "model_artifacts",
     "network_intrusion_model.joblib"
 )
 
 CONFIG_PATH = os.path.join(
-    PROJECT_DIR, "model_artifacts",
+    PROJECT_DIR,
+    "model_artifacts",
     "model_config.json"
 )
 
@@ -56,8 +49,10 @@ def load_model():
 
     return loaded_model, loaded_config
 
+
 try:
     model, config = load_model()
+
     EXPECTED_FEATURES = config["input_features"]
     THRESHOLD = float(config["classification_threshold"])
 
@@ -81,10 +76,20 @@ except Exception as error:
     st.error(f"Model loading failed: {error}")
     st.stop()
 
+
 NUMERICAL_FEATURES = [
     feature for feature in EXPECTED_FEATURES
     if feature not in ["proto", "service", "state"]
 ]
+
+# --------------------------------------------------
+# SAMPLE DATA LOADING
+# --------------------------------------------------
+
+@st.cache_data
+def load_sample_data():
+    return pd.read_csv(SAMPLE_PATH)
+
 
 # --------------------------------------------------
 # HEADER
@@ -122,6 +127,7 @@ page = st.sidebar.radio(
 st.sidebar.divider()
 
 st.sidebar.success("Model Status: Loaded")
+
 st.sidebar.write(f"**Model:** {config['model_name']}")
 st.sidebar.write(f"**Input Features:** {len(EXPECTED_FEATURES)}")
 st.sidebar.write(f"**Threshold:** {THRESHOLD}")
@@ -176,9 +182,103 @@ elif page == "Single Prediction":
         "classify a traffic record."
     )
 
+    # --------------------------------------------------
+    # SAMPLE RECORD LOADER
+    # --------------------------------------------------
+
+    st.subheader("Load a Sample Traffic Record")
+
+    try:
+        sample_data = load_sample_data()
+
+        sample_choices = {}
+
+        for label, name in [(0, "Normal"), (1, "Malicious")]:
+
+            matching_records = sample_data[
+                sample_data["label"] == label
+            ]
+
+            if not matching_records.empty:
+
+                record = matching_records.iloc[0]
+
+                choice = (
+                    f"{name} Traffic "
+                    f"(Record ID: {int(record['id'])})"
+                )
+
+                sample_choices[choice] = record
+
+        if sample_choices:
+
+            selected_sample = st.selectbox(
+                "Choose a sample record",
+                list(sample_choices.keys()),
+                key="sample_record_choice"
+            )
+
+            if st.button(
+                "Load Sample Record",
+                use_container_width=True
+            ):
+
+                sample = sample_choices[selected_sample]
+
+                # Populate all numerical features
+                for feature in NUMERICAL_FEATURES:
+
+                    st.session_state[f"single_{feature}"] = float(
+                        sample[feature]
+                    )
+
+                # Populate categorical features
+                st.session_state["single_proto"] = str(
+                    sample["proto"]
+                )
+
+                st.session_state["single_service"] = str(
+                    sample["service"]
+                )
+
+                st.session_state["single_state"] = str(
+                    sample["state"]
+                )
+
+                st.session_state["sample_loaded"] = (
+                    selected_sample
+                )
+
+                st.rerun()
+
+        else:
+            st.warning(
+                "No valid Normal or Malicious sample records found."
+            )
+
+    except FileNotFoundError:
+        st.error(
+            "sample_records.csv was not found. "
+            "Please check your GitHub repository."
+        )
+
+    except Exception as error:
+        st.error(f"Sample loading failed: {error}")
+
+    if st.session_state.get("sample_loaded"):
+        st.success(
+            f"Loaded: {st.session_state['sample_loaded']}"
+        )
+
+    st.divider()
+
+    # --------------------------------------------------
+    # MANUAL / LOADED INPUT FORM
+    # --------------------------------------------------
+
     st.info(
         "All 42 original model input features are required. "
-        "Values are passed through the trained preprocessing pipeline."
+        "You can enter them manually or load a sample record above."
     )
 
     with st.form("single_prediction_form"):
@@ -191,7 +291,10 @@ elif page == "Single Prediction":
 
         numerical_values = {}
 
-        with st.expander("Numerical Features (39)", expanded=True):
+        with st.expander(
+            "Numerical Features (39)",
+            expanded=True
+        ):
 
             cols = st.columns(2)
 
@@ -201,7 +304,6 @@ elif page == "Single Prediction":
 
                     numerical_values[feature] = st.number_input(
                         feature,
-                        value=0.0,
                         step=0.01,
                         format="%.6f",
                         key=f"single_{feature}"
@@ -212,25 +314,27 @@ elif page == "Single Prediction":
         col1, col2, col3 = st.columns(3)
 
         with col1:
+
             proto = st.selectbox(
                 "Protocol (proto)",
                 CATEGORICAL_OPTIONS["proto"],
-                index=CATEGORICAL_OPTIONS["proto"].index("tcp")
-                if "tcp" in CATEGORICAL_OPTIONS["proto"] else 0
+                key="single_proto"
             )
 
         with col2:
+
             service = st.selectbox(
                 "Service",
                 CATEGORICAL_OPTIONS["service"],
-                index=0
+                key="single_service"
             )
 
         with col3:
+
             state = st.selectbox(
                 "Connection State",
                 CATEGORICAL_OPTIONS["state"],
-                index=0
+                key="single_state"
             )
 
         submitted = st.form_submit_button(
@@ -245,6 +349,7 @@ elif page == "Single Prediction":
     if submitted:
 
         try:
+
             input_data = numerical_values.copy()
 
             input_data["proto"] = proto
@@ -269,6 +374,7 @@ elif page == "Single Prediction":
             )
 
             st.divider()
+
             st.subheader("Prediction Result")
 
             col1, col2 = st.columns(2)
@@ -277,10 +383,12 @@ elif page == "Single Prediction":
 
                 if prediction == 1:
                     st.error("MALICIOUS TRAFFIC DETECTED")
+
                 else:
                     st.success("NORMAL TRAFFIC DETECTED")
 
             with col2:
+
                 st.metric(
                     "Malicious Probability",
                     f"{malicious_probability * 100:.2f}%"
@@ -298,20 +406,30 @@ elif page == "Single Prediction":
             )
 
         except Exception as error:
+
             st.error(f"Prediction failed: {error}")
+
 
 # --------------------------------------------------
 # PLACEHOLDER MODULES
 # --------------------------------------------------
 
 elif page == "Bulk Prediction":
+
     st.header("Bulk Traffic Prediction")
+
     st.info("This module will be implemented next.")
+
 
 elif page == "Model Performance":
+
     st.header("Model Performance")
+
     st.info("This module will be implemented next.")
 
+
 elif page == "Feature Importance":
+
     st.header("Feature Importance")
+
     st.info("This module will be implemented next.")
