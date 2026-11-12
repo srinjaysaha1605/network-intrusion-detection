@@ -38,6 +38,11 @@ CONFIG_PATH = os.path.join(
     "model_config.json"
 )
 
+SAMPLE_PATH = os.path.join(
+    PROJECT_DIR,
+    "sample_records.csv"
+)
+
 # --------------------------------------------------
 # MODEL LOADING
 # --------------------------------------------------
